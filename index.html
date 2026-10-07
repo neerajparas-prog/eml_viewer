@@ -1,0 +1,566 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>EML Reader V5</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;font-family:Arial,Helvetica,sans-serif;background:#f3f5f8;color:#222}
+.header{background:#1f2937;color:#fff;padding:15px 22px;display:flex;align-items:center;justify-content:space-between}
+.header h1{margin:0;font-size:21px}.header span{font-size:12px;opacity:.8}
+.toolbar{background:#fff;padding:12px 18px;border-bottom:1px solid #d7dce2;display:flex;gap:9px;align-items:center;flex-wrap:wrap}
+button,.file-label{border:1px solid #cbd5e1;padding:8px 13px;border-radius:6px;cursor:pointer;font-size:13px;background:#eef2f7;color:#111827}
+.file-label{background:#2563eb;color:#fff;border-color:#2563eb}.file-label:hover{background:#1d4ed8}
+button:hover{background:#e2e8f0}#fileInput{display:none}
+.search{padding:8px 10px;border:1px solid #cbd5e1;border-radius:6px;width:230px}
+.status{font-size:12px;color:#64748b;margin-left:auto}
+.container{display:flex;height:calc(100vh - 110px);min-height:500px}
+.sidebar{width:330px;background:#fff;border-right:1px solid #d7dce2;overflow:auto;padding:17px}
+.sidebar h3{margin:0 0 14px;border-bottom:1px solid #ddd;padding-bottom:9px}
+.info-row{margin-bottom:12px}.info-label{font-size:10px;text-transform:uppercase;color:#64748b;margin-bottom:3px}
+.info-value{font-size:13px;word-break:break-word;white-space:pre-wrap}
+.main{flex:1;display:flex;flex-direction:column;min-width:0}
+.subject{background:#fff;border-bottom:1px solid #ddd;padding:16px 20px}.subject h2{margin:0;font-size:19px;word-break:break-word}
+.body-container{flex:1;padding:18px;overflow:auto}
+.email-body{background:#fff;min-height:100%;border-radius:8px;padding:0;box-shadow:0 1px 4px rgba(0,0,0,.08);overflow:auto}
+.email-frame{display:block;width:100%;height:calc(100vh - 190px);min-height:650px;border:0;background:#fff}
+.plain-text{white-space:pre-wrap;font-family:Arial,Helvetica,sans-serif;line-height:1.5;margin:22px}
+.attachments{margin-top:16px;background:#fff;border-radius:8px;padding:16px;box-shadow:0 1px 4px rgba(0,0,0,.08)}
+.attachments h3{margin:0 0 10px}.attachment{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px;border:1px solid #ddd;border-radius:6px;margin-bottom:7px}
+.attachment-name{font-weight:600;word-break:break-word}.attachment-size{color:#777;font-size:11px}
+.empty{height:100%;display:flex;justify-content:center;align-items:center;color:#888;text-align:center}
+.raw-panel{display:none;background:#111827;color:#e5e7eb;padding:15px;border-radius:7px;white-space:pre-wrap;word-break:break-word;font:12px/1.45 Consolas,monospace}
+.note{display:none;background:#f0f9ff;border:1px solid #bae6fd;color:#075985;padding:9px 12px;border-radius:6px;margin-bottom:12px;font-size:12px}
+@media(max-width:800px){
+ .container{flex-direction:column;height:auto}.sidebar{width:100%;border-right:0;border-bottom:1px solid #ddd}
+ .main{min-height:700px}.status{width:100%;margin-left:0}.email-frame{height:700px}
+}
+@media print{
+ @page{size:A4;margin:12mm}
+ body{background:#fff!important}
+ .header,.toolbar,.sidebar,.subject{display:none!important}
+ .container{display:block!important;height:auto!important;min-height:0!important}
+ .main{display:block!important}.body-container{padding:0!important;overflow:visible!important}
+ .email-body{box-shadow:none!important;border-radius:0!important;overflow:visible!important}
+ .email-frame{height:auto!important;min-height:0!important}
+}
+</style>
+</head>
+<body>
+
+<div class="header">
+ <h1>📧 EML Reader</h1>
+ <span>V5 — Original Email Layout Preserved</span>
+</div>
+
+<div class="toolbar">
+ <label class="file-label">📂 Open .EML File
+  <input id="fileInput" type="file" accept=".eml,message/rfc822">
+ </label>
+ <button id="pdfBtn" onclick="saveAsPDF()">📄 Save Mail as PDF</button>
+ <button id="rawBtn" onclick="toggleRaw()">View Raw</button>
+ <button onclick="clearEmail()">Clear</button>
+ <input id="searchBox" class="search" type="text" placeholder="Search email...">
+ <span id="status" class="status">No EML file selected</span>
+</div>
+
+<div class="container">
+ <aside class="sidebar">
+  <h3>Email Information</h3>
+  <div class="info-row"><div class="info-label">File</div><div class="info-value" id="fileName">-</div></div>
+  <div class="info-row"><div class="info-label">From</div><div class="info-value" id="from">-</div></div>
+  <div class="info-row"><div class="info-label">To</div><div class="info-value" id="to">-</div></div>
+  <div class="info-row"><div class="info-label">CC</div><div class="info-value" id="cc">-</div></div>
+  <div class="info-row"><div class="info-label">BCC</div><div class="info-value" id="bcc">-</div></div>
+  <div class="info-row"><div class="info-label">Date</div><div class="info-value" id="date">-</div></div>
+  <div class="info-row"><div class="info-label">Message ID</div><div class="info-value" id="messageId">-</div></div>
+  <div class="info-row"><div class="info-label">Content Type</div><div class="info-value" id="contentType">-</div></div>
+  <div class="info-row"><div class="info-label">Attachments</div><div class="info-value" id="attachmentCount">0</div></div>
+ </aside>
+
+ <main class="main">
+  <div class="subject"><h2 id="subject">No email loaded</h2></div>
+  <div class="body-container">
+   <div id="emptyState" class="empty">
+    <div><h2>Open an .EML file</h2><p>The email is processed locally and its original HTML layout is preserved.</p></div>
+   </div>
+   <div id="emailContent" style="display:none">
+    <div id="note" class="note"></div>
+    <div id="emailBody" class="email-body"></div>
+    <div id="rawPanel" class="raw-panel"></div>
+    <div id="attachmentsBox" class="attachments" style="display:none">
+     <h3>📎 Attachments</h3><div id="attachments"></div>
+    </div>
+   </div>
+  </div>
+ </main>
+</div>
+
+<script>
+'use strict';
+
+let currentEmail = null;
+let currentRawBytes = null;
+let currentFileName = '';
+
+const $ = id => document.getElementById(id);
+
+/*
+ IMPORTANT:
+ The previous versions decoded the ENTIRE .eml file as UTF-8 before parsing.
+ That can permanently change bytes in 8-bit, quoted-printable and some MIME
+ messages. V5 keeps the original file as a byte-preserving binary string and
+ decodes each MIME part only after its own charset/transfer encoding is known.
+*/
+
+$('fileInput').addEventListener('change', async function(e){
+ const file=e.target.files[0];
+ if(!file)return;
+ currentFileName=file.name;
+ $('status').textContent='Reading '+file.name+'...';
+ try{
+  const buffer=await file.arrayBuffer();
+  currentRawBytes=new Uint8Array(buffer);
+  currentEmail=parseEML(currentRawBytes);
+  displayEmail(currentEmail,file.name);
+  $('status').textContent='Loaded successfully';
+ }catch(err){
+  console.error(err);
+  $('status').textContent='Error reading EML';
+  alert('Unable to read this EML file.\\n\\n'+err.message);
+ }
+});
+
+/* ---------- Byte helpers ---------- */
+
+function bytesToBinary(bytes){
+ let s='';
+ const chunk=0x8000;
+ for(let i=0;i<bytes.length;i+=chunk){
+  s+=String.fromCharCode.apply(null,bytes.subarray(i,Math.min(i+chunk,bytes.length)));
+ }
+ return s;
+}
+
+function binaryToBytes(s){
+ const out=new Uint8Array(s.length);
+ for(let i=0;i<s.length;i++)out[i]=s.charCodeAt(i)&255;
+ return out;
+}
+
+function concatBytes(arrays){
+ let n=0;for(const a of arrays)n+=a.length;
+ const out=new Uint8Array(n);let p=0;
+ for(const a of arrays){out.set(a,p);p+=a.length;}
+ return out;
+}
+
+function asciiText(bytes){
+ return bytesToBinary(bytes);
+}
+
+function textToUTF8Bytes(s){return new TextEncoder().encode(s)}
+
+function decodeBytes(bytes,charset){
+ charset=(charset||'utf-8').trim().toLowerCase().replace(/^["']|["']$/g,'');
+ const aliases={
+  'utf8':'utf-8','utf_8':'utf-8',
+  'latin1':'iso-8859-1','latin-1':'iso-8859-1',
+  'iso8859-1':'iso-8859-1','iso_8859-1':'iso-8859-1',
+  'us-ascii':'windows-1252','ascii':'windows-1252',
+  'cp1252':'windows-1252','windows1252':'windows-1252'
+ };
+ charset=aliases[charset]||charset;
+ try{return new TextDecoder(charset,{fatal:false}).decode(bytes)}
+ catch(e){return new TextDecoder('utf-8',{fatal:false}).decode(bytes)}
+}
+
+/* ---------- Header parsing ---------- */
+
+function splitHeaderBodyBinary(bin){
+ let i=bin.indexOf('\r\n\r\n');
+ if(i>=0)return{header:bin.slice(0,i),body:bin.slice(i+4)};
+ i=bin.indexOf('\n\n');
+ if(i>=0)return{header:bin.slice(0,i),body:bin.slice(i+2)};
+ return{header:bin,body:''};
+}
+
+function unfoldHeaders(s){return s.replace(/\r?\n[ \t]+/g,' ')}
+
+function parseHeaders(s){
+ const h={};
+ for(const line of unfoldHeaders(s).split(/\r?\n/)){
+  const p=line.indexOf(':');
+  if(p<0)continue;
+  const k=line.slice(0,p).trim().toLowerCase();
+  const v=line.slice(p+1).trim();
+  h[k]=h[k]?h[k]+', '+v:v;
+ }
+ return h;
+}
+
+function getParam(header,name){
+ if(!header)return'';
+ const safe=name.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+ const re=new RegExp('(?:^|;)\\s*'+safe+'(?:\\*\\d+)?\\s*=\\s*(?:"([^"]*)"|([^;\\r\\n]*))','i');
+ const m=header.match(re);
+ return m?(m[1]!==undefined?m[1]:m[2].trim()):'';
+}
+
+function getFilename(header){
+ if(!header)return'';
+ // RFC2231 filename*=charset''percent-encoded-name
+ const m=header.match(/(?:^|;)\s*filename\*\s*=\s*([^;]+)/i);
+ if(m){
+  let v=m[1].trim().replace(/^"|"$/g,'');
+  const q=v.indexOf("''");
+  if(q>=0){
+   try{return decodeURIComponent(v.slice(q+2))}
+   catch(e){return v.slice(q+2)}
+  }
+  try{return decodeURIComponent(v)}catch(e){return v}
+ }
+ return getParam(header,'filename');
+}
+
+/* ---------- MIME header encoded words ---------- */
+
+function base64Bytes(s){
+ const clean=s.replace(/[\r\n\t ]/g,'');
+ try{
+  const bin=atob(clean);
+  const out=new Uint8Array(bin.length);
+  for(let i=0;i<bin.length;i++)out[i]=bin.charCodeAt(i);
+  return out;
+ }catch(e){return new Uint8Array(0)}
+}
+
+function hexBytes(hex){
+ const out=new Uint8Array(Math.floor(hex.length/2));
+ for(let i=0;i<out.length;i++)out[i]=parseInt(hex.substr(i*2,2),16);
+ return out;
+}
+
+function decodeHeaderWord(m,cs,enc,data){
+ try{
+  if(enc.toLowerCase()==='b')return decodeBytes(base64Bytes(data),cs);
+  let q=data.replace(/_/g,' ');
+  const parts=[];let plain='';
+  function flush(){if(plain){parts.push(textToUTF8Bytes(plain));plain=''}}
+  for(let i=0;i<q.length;i++){
+   if(q[i]==='=' && /^[0-9A-Fa-f]{2}$/.test(q.slice(i+1,i+3))){
+    flush();parts.push(hexBytes(q.slice(i+1,i+3)));i+=2;
+   }else plain+=q[i];
+  }
+  flush();
+  return decodeBytes(concatBytes(parts),cs);
+ }catch(e){return data}
+}
+
+function decodeHeader(v){
+ if(!v)return'';
+ return v.replace(/=\?([^?\s]+)\?([bBqQ])\?([^?]*)\?=/g,decodeHeaderWord);
+}
+
+/* ---------- Transfer decoding ---------- */
+
+function decodeQuotedPrintable(s){
+ // Input is binary ASCII/8bit string. Preserve all non-encoded bytes.
+ const parts=[];let plain='';
+ function flush(){if(plain){parts.push(binaryToBytes(plain));plain=''}}
+ for(let i=0;i<s.length;i++){
+  if(s[i]==='=' && /^[0-9A-Fa-f]{2}$/.test(s.slice(i+1,i+3))){
+   flush();parts.push(hexBytes(s.slice(i+1,i+3)));i+=2;
+  }else if(s[i]==='=' && (s[i+1]==='\r' || s[i+1]==='\n')){
+   // Soft line break: remove it.
+   if(s[i+1]==='\r' && s[i+2]==='\n')i+=2;else i+=1;
+  }else plain+=s[i];
+ }
+ flush();
+ return concatBytes(parts);
+}
+
+function decodeTransfer(s,enc){
+ enc=(enc||'').trim().toLowerCase();
+ if(enc==='base64')return base64Bytes(s);
+ if(enc==='quoted-printable')return decodeQuotedPrintable(s);
+ if(enc==='7bit'||enc==='8bit'||enc==='binary'||enc==='')return binaryToBytes(s);
+ return binaryToBytes(s);
+}
+
+/* ---------- MIME parser ---------- */
+
+function parseMIME(bin,contentType,transfer,depth=0){
+ const result={plain:null,html:null,attachments:[],inline:[],embedded:[]};
+ if(depth>15)return result;
+
+ const ct=(contentType||'text/plain').trim();
+ const boundary=getParam(ct,'boundary');
+
+ if(!boundary){
+  const bytes=decodeTransfer(bin,transfer);
+  const charset=getParam(ct,'charset')||'utf-8';
+  if(/^text\/html\b/i.test(ct))result.html=decodeBytes(bytes,charset);
+  else if(/^text\//i.test(ct))result.plain=decodeBytes(bytes,charset);
+  return result;
+ }
+
+ // Boundary is ASCII. Do not use a broad string split; it can damage
+ // content that merely happens to contain the boundary text.
+ const marker='--'+boundary;
+ let pos=0;
+ const boundaries=[];
+ while(true){
+  let idx=bin.indexOf(marker,pos);
+  if(idx<0)break;
+  // A legal boundary must begin at start or after CRLF/LF.
+  if(idx===0 || bin[idx-1]==='\n')boundaries.push(idx);
+  pos=idx+marker.length;
+ }
+
+ for(let i=0;i<boundaries.length;i++){
+  const b=boundaries[i];
+  const markerEnd=b+marker.length;
+  if(bin.slice(markerEnd,markerEnd+2)==='--')break;
+
+  let partStart=markerEnd;
+  if(bin.slice(partStart,partStart+2)==='\r\n')partStart+=2;
+  else if(bin[partStart]==='\n')partStart+=1;
+
+  const next=i+1<boundaries.length?boundaries[i+1]:bin.length;
+  let partEnd=next;
+  while(partEnd>partStart && (bin[partEnd-1]==='\n'||bin[partEnd-1]==='\r'))partEnd--;
+
+  const part=bin.slice(partStart,partEnd);
+  if(!part)continue;
+
+  const sb=splitHeaderBodyBinary(part);
+  const ph=parseHeaders(sb.header);
+  const pct=ph['content-type']||'text/plain';
+  const pte=ph['content-transfer-encoding']||'';
+  const disp=ph['content-disposition']||'';
+  const cid=(ph['content-id']||'').replace(/^<|>$/g,'').trim();
+  const fname=decodeHeader(getFilename(disp)||getParam(pct,'name')||'');
+
+  if(/^multipart\//i.test(pct)){
+   const nested=parseMIME(sb.body,pct,pte,depth+1);
+   if(result.plain===null&&nested.plain!==null)result.plain=nested.plain;
+   if(result.html===null&&nested.html!==null)result.html=nested.html;
+   result.attachments.push(...nested.attachments);
+   result.inline.push(...nested.inline);
+   result.embedded.push(...nested.embedded);
+   continue;
+  }
+
+  if(/^message\/rfc822/i.test(pct)){
+   result.embedded.push({filename:fname||'message.eml',data:binaryToBytes(sb.body)});
+   continue;
+  }
+
+  const bytes=decodeTransfer(sb.body,pte);
+  const isInline=/\binline\b/i.test(disp)||!!cid;
+  const isAttachment=/\battachment\b/i.test(disp);
+  const isNamed=!!fname;
+
+  if(isAttachment||isNamed){
+   const item={filename:fname||'attachment',type:pct.split(';')[0].trim()||'application/octet-stream',data:bytes,cid};
+   result.attachments.push(item);
+   if(isInline)result.inline.push(item);
+   continue;
+  }
+
+  if(/^text\/html\b/i.test(pct)){
+   if(result.html===null)result.html=decodeBytes(bytes,getParam(pct,'charset')||'utf-8');
+  }else if(/^text\/plain\b/i.test(pct)){
+   if(result.plain===null)result.plain=decodeBytes(bytes,getParam(pct,'charset')||'utf-8');
+  }
+ }
+
+ return result;
+}
+
+function parseEML(bytes){
+ const bin=bytesToBinary(bytes);
+ const sb=splitHeaderBodyBinary(bin);
+ const h=parseHeaders(sb.header);
+ const ct=h['content-type']||'text/plain';
+ const te=h['content-transfer-encoding']||'';
+ return{headers:h,contentType:ct,body:parseMIME(sb.body,ct,te)};
+}
+
+/* ---------- Display ---------- */
+
+function escapeHTML(s){
+ return s.replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function makeCIDMap(list){
+ const map={};
+ for(const a of list||[])if(a.cid)map[a.cid.toLowerCase()]=a;
+ return map;
+}
+
+function bytesToDataURL(bytes,type){
+ let binary='';
+ const chunk=0x8000;
+ for(let i=0;i<bytes.length;i+=chunk)
+  binary+=String.fromCharCode.apply(null,bytes.subarray(i,Math.min(i+chunk,bytes.length)));
+ return 'data:'+(type||'application/octet-stream')+';base64,'+btoa(binary);
+}
+
+function replaceCIDReferences(html,attachments){
+ const map=makeCIDMap(attachments);
+ if(!Object.keys(map).length)return html;
+ return html.replace(/(src|href)\s*=\s*(["'])cid:([^"']+)\2/gi,(m,attr,quote,cid)=>{
+  const a=map[cid.replace(/[<>]/g,'').trim().toLowerCase()];
+  return a?attr+'='+quote+bytesToDataURL(a.data,a.type)+quote:m;
+ });
+}
+
+function displayBody(body){
+ const c=$('emailBody');c.innerHTML='';
+ if(body.html!==null){
+  const iframe=document.createElement('iframe');
+  iframe.className='email-frame';
+  // Sandbox blocks scripts and navigation while allowing the email's
+  // original HTML/CSS/layout to render without our app CSS interfering.
+  iframe.setAttribute('sandbox','allow-same-origin');
+  iframe.setAttribute('referrerpolicy','no-referrer');
+  iframe.srcdoc=replaceCIDReferences(body.html,body.inline.concat(body.attachments||[]));
+  c.appendChild(iframe);
+ }else if(body.plain!==null){
+  const pre=document.createElement('pre');
+  pre.className='plain-text';
+  pre.textContent=body.plain;
+  c.appendChild(pre);
+ }else{
+  c.textContent='No readable email body found.';
+ }
+}
+
+function displayEmail(email,fileName){
+ $('emptyState').style.display='none';
+ $('emailContent').style.display='block';
+ const h=email.headers;
+ $('fileName').textContent=fileName;
+ $('from').textContent=decodeHeader(h['from']||'-');
+ $('to').textContent=decodeHeader(h['to']||'-');
+ $('cc').textContent=decodeHeader(h['cc']||'-');
+ $('bcc').textContent=decodeHeader(h['bcc']||'-');
+ $('date').textContent=h['date']||'-';
+ $('messageId').textContent=h['message-id']||'-';
+ $('contentType').textContent=email.contentType;
+ $('subject').textContent=decodeHeader(h['subject']||'(No Subject)');
+ $('attachmentCount').textContent=email.body.attachments.length;
+ displayBody(email.body);
+ displayAttachments(email.body.attachments);
+ $('rawPanel').style.display='none';
+ $('emailBody').style.display='block';
+ $('rawBtn').textContent='View Raw';
+}
+
+function displayAttachments(list){
+ const box=$('attachmentsBox'),c=$('attachments');c.innerHTML='';
+ if(!list.length){box.style.display='none';return}
+ box.style.display='block';
+ list.forEach(file=>{
+  const row=document.createElement('div');row.className='attachment';
+  const left=document.createElement('div');
+  const name=document.createElement('div');name.className='attachment-name';name.textContent='📎 '+file.filename;
+  const size=document.createElement('div');size.className='attachment-size';size.textContent=(file.type||'file')+' • '+formatBytes(file.data.length);
+  left.append(name,size);
+  const b=document.createElement('button');b.textContent='Download';b.onclick=()=>downloadAttachment(file);
+  row.append(left,b);c.appendChild(row);
+ });
+}
+
+function downloadAttachment(file){
+ const blob=new Blob([file.data],{type:file.type||'application/octet-stream'});
+ const url=URL.createObjectURL(blob),a=document.createElement('a');
+ a.href=url;a.download=file.filename||'attachment';document.body.appendChild(a);a.click();a.remove();
+ setTimeout(()=>URL.revokeObjectURL(url),1000);
+}
+
+function formatBytes(n){
+ if(n===0)return'0 Bytes';
+ const u=['Bytes','KB','MB','GB','TB'],i=Math.floor(Math.log(n)/Math.log(1024));
+ return(n/Math.pow(1024,i)).toFixed(i?2:0)+' '+u[i];
+}
+
+/* ---------- Raw / search ---------- */
+
+function toggleRaw(){
+ if(!currentRawBytes){alert('Open an EML file first.');return}
+ const p=$('rawPanel'),b=$('emailBody');
+ const show=p.style.display!=='block';
+ p.style.display=show?'block':'none';b.style.display=show?'none':'block';
+ $('rawBtn').textContent=show?'View Email':'View Raw';
+ if(show)p.textContent=decodeBytes(currentRawBytes,'windows-1252');
+}
+
+$('searchBox').addEventListener('input',function(){
+ const term=this.value.trim();
+ if(!term||!currentEmail)return;
+ try{window.find(term,false,false,true,false,false,false)}catch(e){}
+});
+
+/* ---------- PDF ---------- */
+
+function saveAsPDF(){
+ if(!currentEmail){alert('Please open an EML file first.');return}
+ const h=currentEmail.headers||{};
+ const subject=decodeHeader(h['subject']||'(No Subject)');
+ const from=decodeHeader(h['from']||'');
+ const to=decodeHeader(h['to']||'');
+ const cc=decodeHeader(h['cc']||'');
+ const date=h['date']||'';
+
+ let mailHTML='';
+ if(currentEmail.body.html!==null){
+  mailHTML=replaceCIDReferences(currentEmail.body.html,currentEmail.body.inline.concat(currentEmail.body.attachments||[]));
+ }else{
+  mailHTML='<pre style="white-space:pre-wrap;font-family:Arial,Helvetica,sans-serif;line-height:1.5;">'+escapeHTML(currentEmail.body.plain||'')+'</pre>';
+ }
+
+ const w=window.open('','_blank');
+ if(!w){alert('Please allow pop-ups for this HTML file to create the PDF print window.');return}
+
+ w.document.open();
+ w.document.write(`<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>${escapeHTML(subject)}</title>
+<style>
+@page{size:A4;margin:12mm}
+body{margin:0;font-family:Arial,Helvetica,sans-serif;color:#222}
+.print-meta{font-family:Arial,Helvetica,sans-serif;font-size:11px;border-bottom:1px solid #aaa;padding-bottom:10px;margin-bottom:12px}
+.print-subject{font-size:17px;font-weight:bold;margin-bottom:8px}
+.print-body{width:100%;overflow:visible}
+.print-body img{max-width:100%;height:auto}
+.print-body table{max-width:100%}
+</style></head>
+<body>
+<div class="print-subject">${escapeHTML(subject)}</div>
+<div class="print-meta">
+${from?'<div><b>From:</b> '+escapeHTML(from)+'</div>':''}
+${to?'<div><b>To:</b> '+escapeHTML(to)+'</div>':''}
+${cc?'<div><b>CC:</b> '+escapeHTML(cc)+'</div>':''}
+${date?'<div><b>Date:</b> '+escapeHTML(date)+'</div>':''}
+</div>
+<div class="print-body">${mailHTML}</div>
+</body></html>`);
+ w.document.close();
+ setTimeout(()=>{w.focus();w.print()},800);
+}
+
+/* ---------- Clear ---------- */
+
+function clearEmail(){
+ currentEmail=null;currentRawBytes=null;currentFileName='';
+ $('emptyState').style.display='flex';$('emailContent').style.display='none';
+ $('subject').textContent='No email loaded';$('status').textContent='No EML file selected';
+ $('fileInput').value='';$('searchBox').value='';
+ $('attachmentCount').textContent='0';
+}
+</script>
+</body>
+</html>
